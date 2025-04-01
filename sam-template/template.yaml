@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  AWS DataSync configuration with private VPC endpoint
+  
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where to deploy DataSync endpoint
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets where to deploy DataSync endpoint (private subnets recommended)
+
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket to create for DataSync destination (leave empty for auto-generated name)
+    Default: ""
+
+  TagPrefix:
+    Type: String
+    Description: Prefix for resource tags
+    Default: "datasync"
+
+  SecurityGroupIds:
+    Type: CommaDelimitedList
+    Description: Existing security group IDs to use (if empty, a new one will be created)
+    Default: ""
+
+  AllowedCidrBlocks:
+    Type: CommaDelimitedList
+    Description: CIDR blocks allowed to connect to the DataSync endpoint
+    Default: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+  CreateS3Bucket:
+    Type: String
+    Description: Whether to create the S3 bucket
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  EnableCloudWatchLogs:
+    Type: String
+    Description: Enable CloudWatch Logs for DataSync
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+      
+Conditions:
+  CreateSecurityGroup: !Equals 
+    - !Join ["", !Ref SecurityGroupIds]
+    - ""
+  CreateBucket: !Equals 
+    - !Ref CreateS3Bucket
+    - "true"
+  EnableLogs: !Equals 
+    - !Ref EnableCloudWatchLogs
+    - "true"
+
+Resources:
+  # Security Group pour l'endpoint DataSync (si aucun n'est fourni)
+  DataSyncSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateSecurityGroup
+    Properties:
+      GroupName: !Sub "${TagPrefix}-datasync-endpoint-sg"
+      GroupDescription: Security group for DataSync VPC Endpoint
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${TagPrefix}-datasync-endpoint-sg"
+        - Key: Project
+          Value: "DataSync-Private-Endpoint"
+
+  # Règles entrantes pour le security group
+  DataSyncIngressRuleHTTPS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateSecurityGroup
+    Properties:
+      GroupId: !Ref DataSyncSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: !Select [0, !Ref AllowedCidrBlocks]
+      Description: Allow HTTPS for DataSync API
+
+  DataSyncIngressRuleDataPort:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateSecurityGroup
+    Properties:
+      GroupId: !Ref DataSyncSecurityGroup
+      IpProtocol: tcp
+      FromPort: 1024
+      ToPort: 1064
+      CidrIp: !Select [0, !Ref AllowedCidrBlocks]
+      Description: Allow DataSync agent communication
+
+  # VPC Endpoint pour DataSync
+  DataSyncVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.datasync"
+      VpcId: !Ref VpcId
+      SubnetIds: !Ref SubnetIds
+      SecurityGroupIds: 
+        !If 
+          - CreateSecurityGroup
+          - [!Ref DataSyncSecurityGroup]
+          - !Ref SecurityGroupIds
+      Tags:
+        - Key: Name
+          Value: !Sub "${TagPrefix}-datasync-endpoint"
+        - Key: Project
+          Value: "DataSync-Private-Endpoint"
+
+  # S3 Bucket pour la destination DataSync
+  DataSyncDestinationBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateBucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !If 
+        - CreateBucket
+        - !If 
+          - !Equals [!Ref S3BucketName, ""]
+          - !Sub "${TagPrefix}-datasync-destination-${AWS::AccountId}-${AWS::Region}"
+          - !Ref S3BucketName
+        - !Ref AWS::NoValue
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${TagPrefix}-datasync-destination"
+        - Key: Project
+          Value: "DataSync-Private-Endpoint"
+
+  # IAM Role pour DataSync
+  DataSyncRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: datasync.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Tags:
+        - Key: Name
+          Value: !Sub "${TagPrefix}-datasync-role"
+        - Key: Project
+          Value: "DataSync-Private-Endpoint"
+
+  # CloudWatch Logs pour DataSync
+  DataSyncLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: EnableLogs
+    Properties:
+      LogGroupName: !Sub "/aws/datasync/${TagPrefix}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub "${TagPrefix}-datasync-logs"
+        - Key: Project
+          Value: "DataSync-Private-Endpoint"
+
+Outputs:
+  VpcEndpointId:
+    Description: VPC Endpoint ID for DataSync
+    Value: !Ref DataSyncVpcEndpoint
+
+  VpcEndpointDNS:
+    Description: DNS Name for the DataSync VPC Endpoint
+    Value: !Select [1, !GetAtt DataSyncVpcEndpoint.DnsEntries]
+
+  SecurityGroupId:
+    Description: Security Group ID for DataSync VPC Endpoint
+    Value: !If [CreateSecurityGroup, !Ref DataSyncSecurityGroup, !Select [0, !Ref SecurityGroupIds]]
+
+  S3BucketName:
+    Description: S3 Bucket Name for DataSync Destination
+    Value: !If [CreateBucket, !Ref DataSyncDestinationBucket, "N/A - No bucket created"]
+
+  DataSyncRoleArn:
+    Description: IAM Role ARN for DataSync
+    Value: !GetAtt DataSyncRole.Arn
+
+  CloudWatchLogGroup:
+    Description: CloudWatch Log Group for DataSync
+    Value: !If [EnableLogs, !Ref DataSyncLogGroup, "N/A - Logs not enabled"]
