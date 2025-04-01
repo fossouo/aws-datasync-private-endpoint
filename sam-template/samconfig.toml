@@ -1,0 +1,18 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "datasync-vpc-endpoint"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-EXAMPLE"
+s3_prefix = "datasync-vpc-endpoint"
+region = "eu-west-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+  "VpcId=vpc-EXAMPLE",
+  "SubnetIds=subnet-EXAMPLE1,subnet-EXAMPLE2",
+  "TagPrefix=datasync",
+  "CreateS3Bucket=true",
+  "S3BucketName=",
+  "EnableCloudWatchLogs=true"
+]
+confirm_changeset = true
