@@ -2,12 +2,33 @@ provider "aws" {
   region = var.aws_region
 }
 
+terraform {
+  required_version = ">= 0.14.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
+}
+
 locals {
   tags = {
     Project     = "DataSync-Private-Endpoint"
     Environment = var.environment
     ManagedBy   = "Terraform"
   }
+}
+
+# Génération d'un suffixe aléatoire pour les noms de ressources
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
 }
 
 # Security Groups pour l'endpoint DataSync
@@ -79,12 +100,11 @@ resource "aws_s3_bucket" "destination" {
       Name = "${var.prefix}-datasync-destination"
     }
   )
-}
 
-resource "random_string" "suffix" {
-  length  = 8
-  special = false
-  upper   = false
+  # Empêcher la suppression accidentelle
+  lifecycle {
+    prevent_destroy = false # Changez à true en production
+  }
 }
 
 # Configuration du bucket S3
@@ -110,6 +130,15 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "destination" {
       sse_algorithm = "AES256"
     }
   }
+}
+
+resource "aws_s3_bucket_public_access_block" "destination" {
+  bucket = aws_s3_bucket.destination.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # IAM Role pour DataSync
@@ -171,6 +200,21 @@ resource "aws_iam_role_policy_attachment" "datasync_s3_access" {
   policy_arn = aws_iam_policy.datasync_s3_access.arn
 }
 
+# CloudWatch Logs pour DataSync (optionnel)
+resource "aws_cloudwatch_log_group" "datasync" {
+  count = var.enable_cloudwatch_logs ? 1 : 0
+  
+  name              = "/aws/datasync/${var.prefix}"
+  retention_in_days = var.cloudwatch_logs_retention
+  
+  tags = merge(
+    local.tags,
+    {
+      Name = "${var.prefix}-datasync-logs"
+    }
+  )
+}
+
 # Outputs pour être utilisés par d'autres modules ou pour l'information
 output "vpc_endpoint_dns" {
   description = "DNS entries for the VPC endpoint"
@@ -182,7 +226,22 @@ output "s3_bucket_name" {
   value       = aws_s3_bucket.destination.bucket
 }
 
+output "s3_bucket_arn" {
+  description = "ARN of the destination S3 bucket"
+  value       = aws_s3_bucket.destination.arn
+}
+
 output "security_group_id" {
   description = "ID of the security group for the DataSync endpoint"
   value       = aws_security_group.datasync_endpoint.id
+}
+
+output "datasync_role_arn" {
+  description = "ARN of the IAM role used by DataSync"
+  value       = aws_iam_role.datasync.arn
+}
+
+output "cloudwatch_log_group_name" {
+  description = "Name of the CloudWatch Log Group for DataSync (if enabled)"
+  value       = var.enable_cloudwatch_logs ? aws_cloudwatch_log_group.datasync[0].name : "N/A - Logs not enabled"
 }
