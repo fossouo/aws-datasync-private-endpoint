@@ -1,0 +1,32 @@
+# AWS region where resources will be deployed
+aws_region = "eu-west-1"
+
+# Environment name
+environment = "dev"
+
+# Prefix for resource names
+prefix = "datasync"
+
+# VPC ID for the DataSync endpoint
+vpc_id = "vpc-12345678"
+
+# Subnet IDs for the DataSync endpoint (at least one)
+subnet_ids = ["subnet-12345678", "subnet-87654321"]
+
+# CIDR blocks allowed to connect to the DataSync endpoint
+allowed_cidr_blocks = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+# S3 bucket name (leave empty for auto-generated name)
+s3_bucket_name = "my-datasync-destination-bucket"
+
+# Whether to create DataSync locations (source and destination)
+create_datasync_locations = false
+
+# Whether to create a DataSync task
+create_datasync_task = false
+
+# Source path for DataSync (if create_datasync_locations is true)
+datasync_source_path = "/data"
+
+# Schedule for DataSync task (if create_datasync_task is true)
+datasync_schedule = "cron(0 0 ? * SUN *)"  # Weekly on Sunday at midnight
