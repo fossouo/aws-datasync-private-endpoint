@@ -92,3 +92,21 @@ variable "datasync_task_options" {
     LogLevel                   = "TRANSFER"
   }
 }
+
+variable "enable_cloudwatch_logs" {
+  description = "Whether to enable CloudWatch Logs for DataSync"
+  type        = bool
+  default     = true
+}
+
+variable "cloudwatch_logs_retention" {
+  description = "Number of days to retain DataSync logs"
+  type        = number
+  default     = 30
+}
+
+variable "tags" {
+  description = "Additional tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
